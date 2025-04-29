@@ -10,6 +10,7 @@ import curves
 import data
 import models
 import utils
+import losses
 
 
 def main():
@@ -65,6 +66,20 @@ def main():
     parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
     parser.add_argument('--no-compile', action='store_true',
                         help='disable PyTorch 2.0 compilation (default: False)')
+    
+    # Loss function arguments
+    parser.add_argument('--loss', type=str, default='ce', choices=['ce', 'focal'],
+                        help='main loss function to use (default: ce)')
+    parser.add_argument('--focal-alpha', type=float, default=0.25,
+                        help='alpha parameter for focal loss (default: 0.25)')
+    parser.add_argument('--focal-gamma', type=float, default=2.0,
+                        help='gamma parameter for focal loss (default: 2.0)')
+    parser.add_argument('--aux-losses', type=str, nargs='+', default=[],
+                        help='auxiliary losses to track (choices: ce, focal)')
+    parser.add_argument('--aux-focal-alpha', type=float, default=0.25,
+                        help='alpha parameter for auxiliary focal loss (default: 0.25)')
+    parser.add_argument('--aux-focal-gamma', type=float, default=2.0,
+                        help='gamma parameter for auxiliary focal loss (default: 2.0)')
 
     args = parser.parse_args()
 
@@ -141,8 +156,32 @@ def main():
             factor = 0.01
         return factor * base_lr
 
+    # Initialize main loss function
+    if args.loss == 'focal':
+        main_loss = losses.FocalLoss(alpha=args.focal_alpha, gamma=args.focal_gamma, name='main_focal')
+        print(f"Using Focal Loss with alpha={args.focal_alpha}, gamma={args.focal_gamma}")
+    else:
+        main_loss = losses.CrossEntropyLoss(name='main_ce')
+        print("Using Cross Entropy Loss")
 
-    criterion = F.cross_entropy
+    # Initialize auxiliary losses
+    auxiliary_losses = {}
+    for aux_loss_name in args.aux_losses:
+        if aux_loss_name == 'focal':
+            aux_loss = losses.FocalLoss(
+                alpha=args.aux_focal_alpha,
+                gamma=args.aux_focal_gamma,
+                name=f'aux_focal_{len(auxiliary_losses)}'
+            )
+            print(f"Adding auxiliary Focal Loss with alpha={args.aux_focal_alpha}, gamma={args.aux_focal_gamma}")
+        else:
+            aux_loss = losses.CrossEntropyLoss(name=f'aux_ce_{len(auxiliary_losses)}')
+            print(f"Adding auxiliary Cross Entropy Loss")
+        auxiliary_losses[aux_loss.name] = aux_loss
+
+    # Create loss tracker
+    loss_tracker = losses.LossTracker(main_loss, auxiliary_losses)
+
     regularizer = None if args.curve is None else curves.l2_regularizer(args.wd)
     optimizer = torch.optim.SGD(
         filter(lambda param: param.requires_grad, model.parameters()),
@@ -150,7 +189,6 @@ def main():
         momentum=args.momentum,
         weight_decay=args.wd if args.curve is None else 0.0
     )
-
 
     start_epoch = 1
     if args.resume is not None:
@@ -160,7 +198,14 @@ def main():
         model.load_state_dict(checkpoint['model_state'])
         optimizer.load_state_dict(checkpoint['optimizer_state'])
 
-    columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'te_nll', 'te_acc', 'time']
+    # Update columns to include all metrics
+    columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'tr_f1', 'tr_roc_auc']
+    for name in auxiliary_losses:
+        columns.append(f'tr_{name}')
+    columns.extend(['te_nll', 'te_acc', 'te_f1', 'te_roc_auc'])
+    for name in auxiliary_losses:
+        columns.append(f'te_{name}')
+    columns.append('time')
 
     utils.save_checkpoint(
         args.dir,
@@ -170,16 +215,16 @@ def main():
     )
 
     has_bn = utils.check_bn(model)
-    test_res = {'loss': None, 'accuracy': None, 'nll': None}
+    test_res = {'loss': None, 'accuracy': None, 'nll': None, 'f1': None, 'roc_auc': None}
     for epoch in range(start_epoch, args.epochs + 1):
         time_ep = time.time()
 
         lr = learning_rate_schedule(args.lr, epoch, args.epochs)
         utils.adjust_learning_rate(optimizer, lr)
 
-        train_res = utils.train(loaders['train'], model, optimizer, criterion, regularizer)
+        train_res = utils.train(loaders['train'], model, optimizer, loss_tracker, regularizer)
         if args.curve is None or not has_bn:
-            test_res = utils.test(loaders['test'], model, criterion, regularizer)
+            test_res = utils.test(loaders['test'], model, loss_tracker, regularizer)
 
         if epoch % args.save_freq == 0:
             utils.save_checkpoint(
@@ -190,8 +235,16 @@ def main():
             )
 
         time_ep = time.time() - time_ep
-        values = [epoch, lr, train_res['loss'], train_res['accuracy'], test_res['nll'],
-                  test_res['accuracy'], time_ep]
+        values = [
+            epoch, lr,
+            train_res['loss'], train_res['accuracy'], train_res['f1'], train_res['roc_auc']
+        ]
+        values.extend(train_res.get(name, 0.0) for name in auxiliary_losses)
+        values.extend([
+            test_res['nll'], test_res['accuracy'], test_res['f1'], test_res['roc_auc']
+        ])
+        values.extend(test_res.get(name, 0.0) for name in auxiliary_losses)
+        values.append(time_ep)
 
         table = tabulate.tabulate([values], columns, tablefmt='simple', floatfmt='9.4f')
         if epoch % 40 == 1 or epoch == start_epoch:

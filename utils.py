@@ -2,6 +2,7 @@ import numpy as np
 import os
 import torch
 import torch.nn.functional as F
+from sklearn.metrics import f1_score, roc_auc_score
 
 import curves
 
@@ -40,66 +41,138 @@ def save_checkpoint(dir, epoch, name='checkpoint', **kwargs):
     torch.save(state, filepath)
 
 
-def train(train_loader, model, optimizer, criterion, regularizer=None, lr_schedule=None):
-    loss_sum = 0.0
-    correct = 0.0
+def compute_metrics(output, target, num_classes):
+    """Compute various metrics for model evaluation"""
+    # Convert to numpy for sklearn metrics
+    pred = output.argmax(dim=1).cpu().numpy()
+    target = target.cpu().numpy()
+    probs = F.softmax(output, dim=1).cpu().numpy()
+    
+    # Compute accuracy
+    accuracy = (pred == target).mean()
+    
+    # Compute F1 score (macro average)
+    f1 = f1_score(target, pred, average='macro')
+    
+    # Compute ROC AUC (one-vs-rest)
+    try:
+        roc_auc = roc_auc_score(target, probs, multi_class='ovr')
+    except ValueError:
+        # Handle case where some classes are not present in the batch
+        roc_auc = np.nan
+    
+    return {
+        'accuracy': accuracy * 100,  # Convert to percentage
+        'f1': f1 * 100,  # Convert to percentage
+        'roc_auc': roc_auc * 100 if not np.isnan(roc_auc) else 0.0  # Convert to percentage
+    }
 
-    num_iters = len(train_loader)
-    model.train()
-    for iter, (input, target) in enumerate(train_loader):
-        if lr_schedule is not None:
-            lr = lr_schedule(iter / num_iters)
-            adjust_learning_rate(optimizer, lr)
-        input = input.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
 
+def train(loader, model, optimizer, loss_tracker, regularizer=None):
+    loss_tracker.reset()
+    metrics = {
+        'accuracy': 0.0,
+        'f1': 0.0,
+        'roc_auc': 0.0
+    }
+    num_processed = 0
+    all_outputs = []
+    all_targets = []
+
+    for input, target in loader:
+        input, target = input.cuda(), target.cuda()
         output = model(input)
-        loss = criterion(output, target)
+        
+        # Store outputs and targets for metric computation
+        all_outputs.append(output.detach())
+        all_targets.append(target)
+        
+        # Compute main loss
+        loss = loss_tracker.main_loss(output, target)
+        
+        # Add regularization if specified
         if regularizer is not None:
-            loss += regularizer(model)
-
+            loss = loss + regularizer(model)
+        
+        # Update loss tracker
+        loss_tracker.update(output, target, input.size(0))
+        
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        loss_sum += loss.item() * input.size(0)
-        pred = output.data.argmax(1, keepdim=True)
-        correct += pred.eq(target.data.view_as(pred)).sum().item()
+    # Concatenate all outputs and targets
+    all_outputs = torch.cat(all_outputs, dim=0)
+    all_targets = torch.cat(all_targets, dim=0)
+    
+    # Compute metrics
+    batch_metrics = compute_metrics(all_outputs, all_targets, output.size(1))
+    for k, v in batch_metrics.items():
+        metrics[k] = v
 
-    return {
-        'loss': loss_sum / len(train_loader.dataset),
-        'accuracy': correct * 100.0 / len(train_loader.dataset),
+    # Get final loss values
+    losses = loss_tracker.get_losses()
+    results = {
+        'loss': losses['main'],
     }
+    # Add metrics
+    results.update(metrics)
+    # Add auxiliary loss values
+    results.update({k: v for k, v in losses.items() if k != 'main'})
+    
+    return results
 
 
-def test(test_loader, model, criterion, regularizer=None, **kwargs):
-    loss_sum = 0.0
-    nll_sum = 0.0
-    correct = 0.0
-
-    model.eval()
-
-    for input, target in test_loader:
-        input = input.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
-
-        output = model(input, **kwargs)
-        nll = criterion(output, target)
-        loss = nll.clone()
-        if regularizer is not None:
-            loss += regularizer(model)
-
-        nll_sum += nll.item() * input.size(0)
-        loss_sum += loss.item() * input.size(0)
-        pred = output.data.argmax(1, keepdim=True)
-        correct += pred.eq(target.data.view_as(pred)).sum().item()
-
-    return {
-        'nll': nll_sum / len(test_loader.dataset),
-        'loss': loss_sum / len(test_loader.dataset),
-        'accuracy': correct * 100.0 / len(test_loader.dataset),
+def test(loader, model, loss_tracker, regularizer=None):
+    loss_tracker.reset()
+    metrics = {
+        'accuracy': 0.0,
+        'f1': 0.0,
+        'roc_auc': 0.0
     }
+    num_processed = 0
+    all_outputs = []
+    all_targets = []
 
+    with torch.no_grad():
+        for input, target in loader:
+            input, target = input.cuda(), target.cuda()
+            output = model(input)
+            
+            # Store outputs and targets for metric computation
+            all_outputs.append(output)
+            all_targets.append(target)
+            
+            # Compute main loss
+            loss = loss_tracker.main_loss(output, target)
+            
+            # Add regularization if specified
+            if regularizer is not None:
+                loss = loss + regularizer(model)
+            
+            # Update loss tracker
+            loss_tracker.update(output, target, input.size(0))
+
+    # Concatenate all outputs and targets
+    all_outputs = torch.cat(all_outputs, dim=0)
+    all_targets = torch.cat(all_targets, dim=0)
+    
+    # Compute metrics
+    batch_metrics = compute_metrics(all_outputs, all_targets, output.size(1))
+    for k, v in batch_metrics.items():
+        metrics[k] = v
+
+    # Get final loss values
+    losses = loss_tracker.get_losses()
+    results = {
+        'nll': losses['main'],
+    }
+    # Add metrics
+    results.update(metrics)
+    # Add auxiliary loss values
+    results.update({k: v for k, v in losses.items() if k != 'main'})
+    
+    return results
 
 
 def predictions(test_loader, model, **kwargs):
@@ -166,3 +239,8 @@ def update_bn(loader, model, **kwargs):
         num_samples += batch_size
 
     model.apply(lambda module: _set_momenta(module, momenta))
+
+
+def load_checkpoint(dir, epoch):
+    filepath = os.path.join(dir, 'checkpoint-%d.pt' % epoch)
+    return torch.load(filepath)
