@@ -1,0 +1,47 @@
+FROM pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime
+
+# Set non-interactive frontend
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install only essential system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    libopencv-dev \
+    python3-opencv \
+    libjpeg-dev \
+    libpng-dev \
+    libturbojpeg0-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Install only required Python dependencies
+RUN pip install --no-cache-dir \
+    tabulate \
+    numpy==1.24.3 \
+    opencv-python \
+    ffcv==1.0.2 \
+    matplotlib \
+    scipy
+
+# Set working directory
+WORKDIR /app
+
+# Copy necessary project files
+COPY train_ffcv.py .
+COPY utils.py .
+COPY curves.py .
+COPY data.py .
+COPY plane.py .
+COPY fge.py .
+COPY connect.py .
+COPY models/ models/
+
+# Create necessary directories
+RUN mkdir -p data checkpoints experiments
+
+# Set environment variables
+ENV PYTHONPATH=/app
+
+# Default command
+CMD ["python", "train_ffcv.py", "--help"] 
