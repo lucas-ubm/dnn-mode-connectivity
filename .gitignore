@@ -3,6 +3,14 @@ data/
 experiments/
 models/
 checkpoints/
+mlruns/
+
+# MLflow specific
+.mlflow/
+*.mlflow
+mlflow.db
+mlruns/
+mlflow/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

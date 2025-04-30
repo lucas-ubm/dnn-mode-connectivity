@@ -5,6 +5,7 @@
 
 import torch.nn as nn
 import torch.nn.functional as F
+import torch
 
 import curves
 
@@ -87,6 +88,9 @@ class WideResNetBase(nn.Module):
         self.layer3 = self._wide_layer(WideBasic, nstages[3], n, dropout_rate, stride=2)
         self.bn1 = nn.BatchNorm2d(nstages[3], momentum=0.9)
         self.linear = nn.Linear(nstages[3], num_classes)
+        
+        # Pre-allocate memory for the flattened tensor
+        self.register_buffer('flatten_shape', torch.zeros(1, nstages[3], dtype=torch.long))
 
     def _wide_layer(self, block, planes, num_blocks, dropout_rate, stride):
         strides = [stride] + [1] * int(num_blocks - 1)
@@ -99,15 +103,24 @@ class WideResNetBase(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        # Ensure input is in channels_last format
+        x = x.contiguous(memory_format=torch.channels_last)
+        
+        # Forward through convolutional layers
         out = self.conv1(x)
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
         out = F.relu(self.bn1(out))
-        out = F.avg_pool2d(out, 8)
-        out = out.view(out.size(0), -1)
+        
+        # Global average pooling and reshape
+        out = F.adaptive_avg_pool2d(out, (1, 1))
+        batch_size = out.size(0)
+        out = out.view(batch_size, -1)
+        
+        # Linear layer
         out = self.linear(out)
-
+        
         return out
 
 

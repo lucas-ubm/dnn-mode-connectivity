@@ -69,7 +69,12 @@ class LossTracker:
     def update(self, output, target, batch_size):
         """Update loss accumulators with a new batch"""
         # Compute main loss
-        main_loss = self.main_loss(output, target)
+        if isinstance(target, dict):
+            target_tensor = target['target']
+        else:
+            target_tensor = target
+            
+        main_loss = self.main_loss(output, target_tensor)
         if isinstance(main_loss, torch.Tensor):
             self.main_loss_sum += main_loss.item() * batch_size
         else:
@@ -77,7 +82,7 @@ class LossTracker:
 
         # Compute auxiliary losses
         for name, loss_fn in self.auxiliary_losses.items():
-            aux_loss = loss_fn(output, target)
+            aux_loss = loss_fn(output, target_tensor)
             if isinstance(aux_loss, torch.Tensor):
                 self.aux_loss_sums[name] += aux_loss.item() * batch_size
             else:

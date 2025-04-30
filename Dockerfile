@@ -1,9 +1,9 @@
-FROM pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 
 # Set non-interactive frontend
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install only essential system dependencies
+# Install only essential system dependencies in a single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
@@ -15,33 +15,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Install only required Python dependencies
+# Install Python dependencies in a single layer
 RUN pip install --no-cache-dir \
     tabulate \
-    numpy==1.24.3 \
+    numpy>=1.24.3 \
     opencv-python \
     ffcv==1.0.2 \
     matplotlib \
-    scipy
+    scipy \
+    scikit-learn \
+    mlflow>=2.8.0
 
 # Set working directory
 WORKDIR /app
 
-# Copy necessary project files
-COPY train_ffcv.py .
-COPY utils.py .
-COPY curves.py .
-COPY data.py .
-COPY plane.py .
-COPY fge.py .
-COPY connect.py .
+# Copy only the necessary files for training
+COPY train.py utils.py losses.py loss_tracker.py ./
 COPY models/ models/
 
 # Create necessary directories
-RUN mkdir -p data checkpoints experiments
+RUN mkdir -p data checkpoints experiments mlruns
 
 # Set environment variables
 ENV PYTHONPATH=/app
+ENV CUDA_VISIBLE_DEVICES=0
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+ENV MLFLOW_TRACKING_URI=/app/mlruns
 
 # Default command
-CMD ["python", "train_ffcv.py", "--help"] 
+CMD ["python", "train.py", "--help"] 

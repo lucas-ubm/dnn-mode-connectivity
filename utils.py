@@ -56,9 +56,19 @@ def compute_metrics(output, target, num_classes):
     
     # Compute ROC AUC (one-vs-rest)
     try:
-        roc_auc = roc_auc_score(target, probs, multi_class='ovr')
+        # Ensure we have all classes represented in the batch
+        if len(np.unique(target)) == num_classes:
+            roc_auc = roc_auc_score(target, probs, multi_class='ovr')
+        else:
+            # If not all classes are present, compute ROC AUC for each class separately
+            roc_auc = 0.0
+            for i in range(num_classes):
+                try:
+                    roc_auc += roc_auc_score((target == i).astype(int), probs[:, i])
+                except ValueError:
+                    continue
+            roc_auc /= num_classes
     except ValueError:
-        # Handle case where some classes are not present in the batch
         roc_auc = np.nan
     
     return {
@@ -68,7 +78,7 @@ def compute_metrics(output, target, num_classes):
     }
 
 
-def train(loader, model, optimizer, loss_tracker, regularizer=None):
+def train(loader, model, optimizer, loss_tracker, regularizer=None, scaler=None):
     loss_tracker.reset()
     metrics = {
         'accuracy': 0.0,
@@ -81,25 +91,35 @@ def train(loader, model, optimizer, loss_tracker, regularizer=None):
 
     for input, target in loader:
         input, target = input.cuda(), target.cuda()
-        output = model(input)
         
-        # Store outputs and targets for metric computation
-        all_outputs.append(output.detach())
-        all_targets.append(target)
-        
-        # Compute main loss
-        loss = loss_tracker.main_loss(output, target)
-        
-        # Add regularization if specified
-        if regularizer is not None:
-            loss = loss + regularizer(model)
+        # Use autocast for mixed precision
+        with torch.cuda.amp.autocast():
+            output = model(input)
+            
+            # Store outputs and targets for metric computation
+            all_outputs.append(output.detach())
+            all_targets.append(target)
+            
+            # Compute main loss
+            loss = loss_tracker.main_loss(output, target)
+            
+            # Add regularization if specified
+            if regularizer is not None:
+                loss = loss + regularizer(model)
         
         # Update loss tracker
         loss_tracker.update(output, target, input.size(0))
         
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        
+        # Scale loss and backpropagate
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
 
     # Concatenate all outputs and targets
     all_outputs = torch.cat(all_outputs, dim=0)
@@ -123,7 +143,7 @@ def train(loader, model, optimizer, loss_tracker, regularizer=None):
     return results
 
 
-def test(loader, model, loss_tracker, regularizer=None):
+def test(loader, model, loss_tracker, regularizer=None, scaler=None):
     loss_tracker.reset()
     metrics = {
         'accuracy': 0.0,
@@ -137,18 +157,21 @@ def test(loader, model, loss_tracker, regularizer=None):
     with torch.no_grad():
         for input, target in loader:
             input, target = input.cuda(), target.cuda()
-            output = model(input)
             
-            # Store outputs and targets for metric computation
-            all_outputs.append(output)
-            all_targets.append(target)
-            
-            # Compute main loss
-            loss = loss_tracker.main_loss(output, target)
-            
-            # Add regularization if specified
-            if regularizer is not None:
-                loss = loss + regularizer(model)
+            # Use autocast for mixed precision
+            with torch.cuda.amp.autocast():
+                output = model(input)
+                
+                # Store outputs and targets for metric computation
+                all_outputs.append(output.clone().detach())
+                all_targets.append(target)
+                
+                # Compute main loss
+                loss = loss_tracker.main_loss(output, target)
+                
+                # Add regularization if specified
+                if regularizer is not None:
+                    loss = loss + regularizer(model)
             
             # Update loss tracker
             loss_tracker.update(output, target, input.size(0))
