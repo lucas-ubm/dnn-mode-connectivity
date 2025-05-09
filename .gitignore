@@ -4,6 +4,7 @@ experiments/
 models/
 checkpoints/
 mlruns/
+results/
 
 # MLflow specific
 .mlflow/
