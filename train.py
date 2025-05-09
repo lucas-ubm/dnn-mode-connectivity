@@ -146,7 +146,7 @@ def main():
         if hasattr(model, 'enable_checkpointing'):
             model.enable_checkpointing()
 
-        if not args.no_compile:
+        if not args.no_compile and not 'vgg' in args.model.lower():
             try:
                 # Use more compatible compilation settings
                 model = torch.compile(

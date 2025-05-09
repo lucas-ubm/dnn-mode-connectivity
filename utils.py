@@ -188,7 +188,7 @@ def test(loader, model, loss_tracker, regularizer=None, scaler=None):
     # Get final loss values
     losses = loss_tracker.get_losses()
     results = {
-        'nll': losses['main'],
+        'loss': losses['main'],
     }
     # Add metrics
     results.update(metrics)
