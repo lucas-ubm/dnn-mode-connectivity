@@ -6,20 +6,12 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import os
 import seaborn as sns
+import mlflow
+import json
 
 parser = argparse.ArgumentParser(description='Checkpoint plane visualization')
 parser.add_argument('--dir', type=str, default='/tmp/checkpoint_plane/', metavar='DIR',
                     help='directory containing checkpoint plane data (default: /tmp/checkpoint_plane/)')
-
-args = parser.parse_args()
-
-file = np.load(os.path.join(args.dir, 'checkpoint_plane.npz'))
-
-matplotlib.rc('xtick.major', pad=12)
-matplotlib.rc('ytick.major', pad=12)
-matplotlib.rc('grid', linewidth=0.8)
-
-sns.set_style('whitegrid')
 
 class LogNormalize(colors.Normalize):
     def __init__(self, vmin=None, vmax=None, clip=None, log_alpha=None):
@@ -31,9 +23,7 @@ class LogNormalize(colors.Normalize):
         log_v = np.ma.maximum(log_v, self.log_alpha)
         return 0.9 * (log_v - self.log_alpha) / (np.log(self.vmax - self.vmin) - self.log_alpha)
 
-def plot_plane(file, args, ref_coordinates, property:str):
-    
-    # Plot training loss
+def plot_plane(file, args, ref_coordinates, property: str):
     plt.figure(figsize=(12.4, 7))
 
     contour, contourf, colorbar = plane(
@@ -43,13 +33,13 @@ def plot_plane(file, args, ref_coordinates, property:str):
         log_alpha=-5.0,
         N=7
     )
+    mlflow_runs = load_mlflow_runs(file)
 
     ref_coordinates = file['ref_coordinates']
-    # Plot reference points and connecting line
-    plt.scatter(ref_coordinates[1, 0], ref_coordinates[1, 1], marker='o', c='k', s=120, zorder=2, label='Binary CE')
-    plt.scatter(ref_coordinates[2, 0], ref_coordinates[2, 1], marker='D', c='k', s=120, zorder=2, label='Focal 1')
-    plt.scatter(ref_coordinates[0, 0], ref_coordinates[0, 1], marker='D', c='k', s=120, zorder=2, label='Focal 2')
-
+    print(mlflow_runs[0])
+    plt.scatter(ref_coordinates[1, 0], ref_coordinates[1, 1], marker='o', c='k', s=120, zorder=2, label=mlflow_runs[1].info.run_name)
+    plt.scatter(ref_coordinates[2, 0], ref_coordinates[2, 1], marker='D', c='k', s=120, zorder=2, label=mlflow_runs[2].info.run_name)
+    plt.scatter(ref_coordinates[0, 0], ref_coordinates[0, 1], marker='^', c='k', s=120, zorder=2, label=mlflow_runs[0].info.run_name)
 
     plt.legend(fontsize=14)
     plt.margins(0.0)
@@ -57,7 +47,6 @@ def plot_plane(file, args, ref_coordinates, property:str):
     plt.xticks(fontsize=18)
     colorbar.ax.tick_params(labelsize=18)
     plt.savefig(os.path.join(args.dir, f'{property}_plane.pdf'), format='pdf', bbox_inches='tight')
-
 
 def plane(grid, values, vmax=None, log_alpha=-5, N=7, cmap='jet_r'):
     cmap = plt.get_cmap(cmap)
@@ -85,8 +74,41 @@ def plane(grid, values, vmax=None, log_alpha=-5, N=7, cmap='jet_r'):
     colorbar.ax.set_yticklabels(labels)
     return contour, contourf, colorbar
 
-# Plot training loss using function plot_plane 
-plot_plane(file, args, file['ref_coordinates'], 'tr_loss')
+def load_mlflow_runs(file):
+    checkpoints = file['checkpoints']
+    runs = []
+    # TODO: take out .item().values() when I save the checkpoints as array instead of dict
+    for checkpoint in checkpoints.item().values():
+        run_id = checkpoint.split('/artifacts')[0].split('/')[-1]  # Assuming checkpoint names are stored as bytes
+        try:
+            run = mlflow.get_run(run_id)
+            runs.append(run)
+        except mlflow.exceptions.RestException:
+            print(f"Run with ID {run_id} not found in MLflow tracking server.")
+    return runs
 
-# Plot test error using function plot_plane
-plot_plane(file, args, file['ref_coordinates'], 'te_err')
+def main():
+    args = parser.parse_args()
+
+    # TODO: switch back to allow_pickle=False when I save the checkpoints as array instead of dict
+    file = np.load(os.path.join(args.dir, 'checkpoint_plane.npz'), allow_pickle=True)
+
+    matplotlib.rc('xtick.major', pad=12)
+    matplotlib.rc('ytick.major', pad=12)
+    matplotlib.rc('grid', linewidth=0.8)
+
+    sns.set_style('whitegrid')
+
+    mlflow_runs = load_mlflow_runs(file)
+    print(mlflow_runs)
+
+    # Plot training loss
+    plot_plane(file, args, file['ref_coordinates'], 'tr_loss')
+    plot_plane(file, args, file['ref_coordinates'], 'tr_loss_1')
+    plot_plane(file, args, file['ref_coordinates'], 'tr_loss_2')
+
+    # Plot test error
+    plot_plane(file, args, file['ref_coordinates'], 'te_err')
+
+if __name__ == "__main__":
+    main()

@@ -5,7 +5,7 @@ import json
 import tabulate
 import torch
 import torch.nn.functional as F
-
+import time
 import data
 import models
 import utils
@@ -40,8 +40,12 @@ parser.add_argument('--num_workers', type=int, default=4, metavar='N',
 
 parser.add_argument('--model', type=str, default=None, metavar='MODEL',
                     help='model name (default: None)')
-parser.add_argument('--checkpoints', nargs='+', type=str, required=True,
-                    help='list of checkpoint files to use as reference points')
+parser.add_argument('--checkpoint_0', type=str, required=True,
+                    help='first checkpoint file to use as reference point')
+parser.add_argument('--checkpoint_1', type=str, required=True,
+                    help='second checkpoint file to use as reference point')
+parser.add_argument('--checkpoint_2', type=str, required=True,
+                    help='third checkpoint file to use as reference point')
 parser.add_argument('--loss_config', type=str, required=True,
                     help='path to loss configuration JSON file')
 parser.add_argument('--wd', type=float, default=1e-4, metavar='WD',
@@ -70,8 +74,9 @@ def main():
     args = parser.parse_args()
     os.makedirs(args.dir, exist_ok=True)
 
-    if len(args.checkpoints) < 3:
-        raise ValueError("At least 3 checkpoints are required to define a plane")
+    # TODO: decide on a good name, maybe separate mlflow tag
+
+    checkpoints = [args.checkpoint_0, args.checkpoint_1, args.checkpoint_2]
 
     # Setup data loaders
     loaders, num_classes = data.loaders(
@@ -83,37 +88,69 @@ def main():
         args.use_test,
         shuffle_train=False
     )
-
-    # Setup model
-    architecture = getattr(models, args.model)
-    base_model = architecture.base(num_classes, **architecture.kwargs)
-    base_model.cuda()
-
-    # Load loss configuration
-    loss_config = load_loss_config(args.loss_config)
-    main_loss_config = loss_config.get('main_loss', {'type': 'ce'})
-    print('Using main loss:', main_loss_config['type'], 'with params:', main_loss_config.get('params', {}))
-    criterion = losses.get_loss(main_loss_config['type'], **main_loss_config.get('params', {}))
-    loss_tracker = losses.LossTracker(criterion)
+    
 
     regularizer = utils.l2_regularizer(args.wd)
 
     # Get weights from all checkpoints
-    w = [get_weights_from_checkpoint(base_model, ckpt) for ckpt in args.checkpoints]
-    print('Weight space dimensionality: %d' % w[0].shape[0])
+    # The model architecture needs to be the same for all checkpoints because otherwise you can't interpolate between them
+    with open(args.checkpoint_0.split('/artifacts')[0] + '/params/model', 'r') as f:
+        model_type = f.read()
+    model_architecture = getattr(models, model_type)
+    base_model = model_architecture.base(num_classes, **model_architecture.kwargs)
+    base_model.cuda()
+
+
+    loss_config_path = os.listdir(args.checkpoint_0.split('/model')[0] + '/loss_config.json')[0]
+    with open(loss_config_path, 'r') as f:
+        model_0_loss_config = json.load(f)['main_loss']
+
+    # Load loss configuration
+    model_0_criterion = losses.get_loss(model_0_loss_config['type'], **model_0_loss_config.get('params', {}))
+
+    w_0 = get_weights_from_checkpoint(base_model, args.checkpoint_0)
+
+    loss_config_path = os.listdir(args.checkpoint_1.split('/model')[0] + '/loss_config.json')[0]
+    with open(loss_config_path, 'r') as f:
+        model_1_loss_config = json.load(f)['main_loss']
+
+    # Load loss configuration
+    model_1_criterion = losses.get_loss(model_1_loss_config['type'], **model_1_loss_config.get('params', {}))
+
+    w_1 = get_weights_from_checkpoint(base_model, args.checkpoint_1)
+
+    loss_config_path = os.listdir(args.checkpoint_2.split('/model')[0] + '/loss_config.json')[0]
+    with open(loss_config_path, 'r') as f:
+        model_2_loss_config = json.load(f)['main_loss']
+
+    # Load loss configuration
+    model_2_criterion = losses.get_loss(model_2_loss_config['type'], **model_2_loss_config.get('params', {}))
+    
+
+    w_2 = get_weights_from_checkpoint(base_model, args.checkpoint_2)
+
+    loss_tracker = losses.LossTracker(model_0_criterion, auxiliary_losses={
+        'model_1_loss': model_1_criterion,
+        'model_2_loss': model_2_criterion})
+
 
     # Create plane from first three points
-    u = w[1] - w[0]  # First basis vector
+    u = w_1 - w_0  # First basis vector
     dx = np.linalg.norm(u)
     u /= dx
 
-    v = w[2] - w[0]  # Second basis vector
+    v = w_2 - w_0  # Second basis vector
     v -= np.dot(u, v) * u  # Make orthogonal to u
     dy = np.linalg.norm(v)
     v /= dy
 
     # Store all reference point coordinates
-    ref_coordinates = np.stack([get_xy(p, w[0], u, v) for p in w])
+    w_0_ref_coordinates = get_xy(w_0, w_0, u, v) 
+    w_1_ref_coordinates = get_xy(w_1, w_0, u, v)
+    w_2_ref_coordinates = get_xy(w_2, w_0, u, v)
+
+    ref_coordinates = np.stack([w_0_ref_coordinates, w_1_ref_coordinates, w_2_ref_coordinates] )
+
 
     # Setup evaluation grid
     G = args.grid_points
@@ -121,22 +158,27 @@ def main():
     betas = np.linspace(0.0 - args.margin_bottom, 1.0 + args.margin_top, G)
 
     # Initialize result arrays
+    # TODO: dynamically compute at least all relevant losses
     tr_loss = np.zeros((G, G))
+    tr_loss_1 = np.zeros((G, G))
+    tr_loss_2 = np.zeros((G, G))
     tr_nll = np.zeros((G, G))
     tr_acc = np.zeros((G, G))
     tr_err = np.zeros((G, G))
     te_loss = np.zeros((G, G))
+    te_loss_1 = np.zeros((G, G))
+    te_loss_2 = np.zeros((G, G))
     te_nll = np.zeros((G, G))
     te_acc = np.zeros((G, G))
     te_err = np.zeros((G, G))
     grid = np.zeros((G, G, 2))
 
-    columns = ['X', 'Y', 'Train loss', 'Train nll', 'Train error (%)', 'Test nll', 'Test error (%)']
-
+    # columns = ['X', 'Y', 'Train loss', 'Train nll', 'Train error (%)', 'Test nll', 'Test error (%)']
+    start = time.time()
     for i, alpha in enumerate(alphas):
         for j, beta in enumerate(betas):
             # Get point in the plane
-            p = w[0] + alpha * dx * u + beta * dy * v
+            p = w_0 + alpha * dx * u + beta * dy * v
 
             # Update model parameters
             offset = 0
@@ -150,34 +192,44 @@ def main():
             utils.update_bn(loaders['train'], base_model)
 
             # Evaluate model
+            # TODO: this should compute *all* relevant losses, not just the main one
+
             tr_res = utils.test(loaders['train'], base_model, loss_tracker, regularizer)
             te_res = utils.test(loaders['test'], base_model, loss_tracker, regularizer)
 
             # Store results
             tr_loss[i, j] = tr_res['loss']
+            tr_loss_1[i, j] = tr_res['model_1_loss']
+            tr_loss_2[i, j] = tr_res['model_2_loss']
             # tr_nll[i, j] = tr_res['nll']
             tr_acc[i, j] = tr_res['accuracy']
             tr_err[i, j] = 100.0 - tr_acc[i, j]
 
             te_loss[i, j] = te_res['loss']
+            te_loss_1[i, j] = te_res['model_1_loss']
+            te_loss_2[i, j] = te_res['model_2_loss']
             # te_nll[i, j] = te_res['nll']
             te_acc[i, j] = te_res['accuracy']
             te_err[i, j] = 100.0 - te_acc[i, j]
 
             grid[i, j] = [alpha * dx, beta * dy]
 
-            # Print current results
-            values = [
-                grid[i, j, 0], grid[i, j, 1], tr_loss[i, j], tr_nll[i, j], tr_err[i, j],
-                te_nll[i, j], te_err[i, j]
-            ]
-            table = tabulate.tabulate([values], columns, tablefmt='simple', floatfmt='10.4f')
-            if j == 0:
-                table = table.split('\n')
-                table = '\n'.join([table[1]] + table)
-            else:
-                table = table.split('\n')[2]
-            print(table)
+            # # Print current results
+            # values = [
+            #     grid[i, j, 0], grid[i, j, 1], tr_loss[i, j], tr_nll[i, j], tr_err[i, j],
+            #     te_nll[i, j], te_err[i, j]
+            # ]
+            # table = tabulate.tabulate([values], columns, tablefmt='simple', floatfmt='10.4f')
+            # if j == 0:
+            #     table = table.split('\n')
+            #     table = '\n'.join([table[1]] + table)
+            # else:
+            #     table = table.split('\n')[2]
+            # print(table)
+            if (i * G + j + 1) % 10 == 0:
+                # Print progress every 10 points
+                print(f"Out of all {G*G} points, {i*G+j+1} done ({(i*G+j+1)/(G*G)*100:.2f}%) in {time.time() - start:.2f} seconds")
+                start = time.time()
 
     # Save results
     np.savez(
@@ -187,13 +239,18 @@ def main():
         betas=betas,
         grid=grid,
         tr_loss=tr_loss,
+        tr_loss_1=tr_loss_1,
+        tr_loss_2=tr_loss_2,
         tr_acc=tr_acc,
         tr_nll=tr_nll,
         tr_err=tr_err,
         te_loss=te_loss,
+        te_loss_1=te_loss_1,
+        te_loss_2=te_loss_2,
         te_acc=te_acc,
         te_nll=te_nll,
-        te_err=te_err
+        te_err=te_err,
+        checkpoints=checkpoints,
     )
 
 if __name__ == '__main__':

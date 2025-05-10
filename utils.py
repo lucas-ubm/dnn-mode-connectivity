@@ -55,6 +55,7 @@ def compute_metrics(output, target, num_classes):
     f1 = f1_score(target, pred, average='macro')
     
     # Compute ROC AUC (one-vs-rest)
+    # TODO: fix ROC AUC, due to batching issues it does not work correctly.
     try:
         # Ensure we have all classes represented in the batch
         if len(np.unique(target)) == num_classes:
