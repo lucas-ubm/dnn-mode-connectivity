@@ -2,7 +2,9 @@ import os
 import torch
 import torchvision
 import torchvision.transforms as transforms
-
+from contextlib import contextmanager
+import sys
+import os 
 
 class Transforms:
 
@@ -39,18 +41,30 @@ class Transforms:
     CIFAR100 = CIFAR10
 
 
+@contextmanager
+def suppress_stdout():
+    with open(os.devnull, 'w') as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
+
 def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=False,
             shuffle_train=True):
     ds = getattr(torchvision.datasets, dataset)
     path = os.path.join(path, dataset.lower())
     transform = getattr(getattr(Transforms, dataset), transform_name)
-    train_set = ds(path, train=True, download=True, transform=transform.train)
+    with suppress_stdout():
+        train_set = ds(path, train=True, download=True, transform=transform.train)
 
     if use_test:
         print('You are going to run models on the test set. Are you sure?')
-        test_set = ds(path, train=False, download=True, transform=transform.test)
+        with suppress_stdout():
+            test_set = ds(path, train=False, download=True, transform=transform.test)
     else:
-        print("Using train (45000) + validation (5000)")
+        # print("Using train (45000) + validation (5000)")
         train_set.data = train_set.data[:-5000]
         train_set.targets = train_set.targets[:-5000]
 

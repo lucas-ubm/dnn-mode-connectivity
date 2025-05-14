@@ -36,7 +36,6 @@ def plot_plane(file, args, ref_coordinates, property: str):
     mlflow_runs = load_mlflow_runs(file)
 
     ref_coordinates = file['ref_coordinates']
-    print(mlflow_runs[0])
     plt.scatter(ref_coordinates[1, 0], ref_coordinates[1, 1], marker='o', c='k', s=120, zorder=2, label=mlflow_runs[1].info.run_name)
     plt.scatter(ref_coordinates[2, 0], ref_coordinates[2, 1], marker='D', c='k', s=120, zorder=2, label=mlflow_runs[2].info.run_name)
     plt.scatter(ref_coordinates[0, 0], ref_coordinates[0, 1], marker='^', c='k', s=120, zorder=2, label=mlflow_runs[0].info.run_name)
@@ -50,6 +49,7 @@ def plot_plane(file, args, ref_coordinates, property: str):
 
 def plane(grid, values, vmax=None, log_alpha=-5, N=7, cmap='jet_r'):
     cmap = plt.get_cmap(cmap)
+    values = np.where(np.isnan(values), 0, values)
     if vmax is None:
         clipped = values.copy()
     else:
@@ -78,7 +78,9 @@ def load_mlflow_runs(file):
     checkpoints = file['checkpoints']
     runs = []
     # TODO: take out .item().values() when I save the checkpoints as array instead of dict
-    for checkpoint in checkpoints.item().values():
+    if isinstance(checkpoints, dict):
+        checkpoints = checkpoints.item().values()
+    for checkpoint in checkpoints:
         run_id = checkpoint.split('/artifacts')[0].split('/')[-1]  # Assuming checkpoint names are stored as bytes
         try:
             run = mlflow.get_run(run_id)
@@ -100,7 +102,6 @@ def main():
     sns.set_style('whitegrid')
 
     mlflow_runs = load_mlflow_runs(file)
-    print(mlflow_runs)
 
     # Plot training loss
     plot_plane(file, args, file['ref_coordinates'], 'tr_loss')

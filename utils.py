@@ -3,17 +3,23 @@ import os
 import torch
 import torch.nn.functional as F
 from sklearn.metrics import f1_score, roc_auc_score
+from collections import OrderedDict
 
 import curves
 
 
-def l2_regularizer(weight_decay):
-    def regularizer(model):
+class L2Regularizer:
+    def __init__(self, weight_decay):
+        self.weight_decay = weight_decay
+    
+    def __call__(self, model):
         l2 = 0.0
         for p in model.parameters():
             l2 += torch.sqrt(torch.sum(p ** 2))
-        return 0.5 * weight_decay * l2
-    return regularizer
+        return 0.5 * self.weight_decay * l2
+
+def l2_regularizer(weight_decay):
+    return L2Regularizer(weight_decay)
 
 
 def cyclic_learning_rate(epoch, cycle, alpha_1, alpha_2):
@@ -242,6 +248,23 @@ def _set_momenta(module, momenta):
     if isbatchnorm(module):
         module.momentum = momenta[module]
 
+def get_weights_from_checkpoint(model, checkpoint_path):
+    """Extract weights from a checkpoint file"""
+    checkpoint = torch.load(checkpoint_path)
+    print('Using new loader')
+    if 'state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['state_dict'])
+    else:
+        if any(k.startswith('_orig_mod.') for k in checkpoint.keys()):
+            print(f"Detected '_orig_mod.' prefix in {checkpoint_path}. Stripping it.")
+            new_state_dict = OrderedDict()
+            for k, v in checkpoint.items():
+                new_key = k.replace('_orig_mod.', '')
+                new_state_dict[new_key] = v
+            model.load_state_dict(new_state_dict)
+        else:
+            model.load_state_dict(checkpoint)
+    return np.concatenate([p.data.cpu().numpy().ravel() for p in model.parameters()])
 
 def update_bn(loader, model, **kwargs):
     if not check_bn(model):
@@ -251,16 +274,25 @@ def update_bn(loader, model, **kwargs):
     model.apply(reset_bn)
     model.apply(lambda module: _get_momenta(module, momenta))
     num_samples = 0
-    for input, _ in loader:
-        input = input.cuda(non_blocking=True)
-        batch_size = input.data.size(0)
+    
+    # Set number of threads to 1 for worker processes
+    num_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    
+    try:
+        for input, _ in loader:
+            input = input.cuda(non_blocking=True)
+            batch_size = input.data.size(0)
 
-        momentum = batch_size / (num_samples + batch_size)
-        for module in momenta.keys():
-            module.momentum = momentum
+            momentum = batch_size / (num_samples + batch_size)
+            for module in momenta.keys():
+                module.momentum = momentum
 
-        model(input, **kwargs)
-        num_samples += batch_size
+            model(input, **kwargs)
+            num_samples += batch_size
+    finally:
+        # Restore original thread count
+        torch.set_num_threads(num_threads)
 
     model.apply(lambda module: _set_momenta(module, momenta))
 

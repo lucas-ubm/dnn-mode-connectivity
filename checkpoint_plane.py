@@ -57,15 +57,6 @@ def load_loss_config(config_path):
         config = json.load(f)
     return config
 
-def get_weights_from_checkpoint(model, checkpoint_path):
-    """Extract weights from a checkpoint file"""
-    checkpoint = torch.load(checkpoint_path)
-    if 'state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['state_dict'])
-    else:
-        model.load_state_dict(checkpoint)
-    return np.concatenate([p.data.cpu().numpy().ravel() for p in model.parameters()])
-
 def get_xy(point, origin, vector_x, vector_y):
     """Get 2D coordinates of a point in the plane"""
     return np.array([np.dot(point - origin, vector_x), np.dot(point - origin, vector_y)])
@@ -73,8 +64,6 @@ def get_xy(point, origin, vector_x, vector_y):
 def main():
     args = parser.parse_args()
     os.makedirs(args.dir, exist_ok=True)
-
-    # TODO: decide on a good name, maybe separate mlflow tag
 
     checkpoints = [args.checkpoint_0, args.checkpoint_1, args.checkpoint_2]
 
@@ -108,7 +97,7 @@ def main():
     # Load loss configuration
     model_0_criterion = losses.get_loss(model_0_loss_config['type'], **model_0_loss_config.get('params', {}))
 
-    w_0 = get_weights_from_checkpoint(base_model, args.checkpoint_0)
+    w_0 = utils.get_weights_from_checkpoint(base_model, args.checkpoint_0)
 
     loss_config_path = os.listdir(args.checkpoint_1.split('/model')[0] + '/loss_config.json')[0]
     with open(loss_config_path, 'r') as f:
@@ -117,7 +106,7 @@ def main():
     # Load loss configuration
     model_1_criterion = losses.get_loss(model_1_loss_config['type'], **model_1_loss_config.get('params', {}))
 
-    w_1 = get_weights_from_checkpoint(base_model, args.checkpoint_1)
+    w_1 = utils.get_weights_from_checkpoint(base_model, args.checkpoint_1)
 
     loss_config_path = os.listdir(args.checkpoint_2.split('/model')[0] + '/loss_config.json')[0]
     with open(loss_config_path, 'r') as f:
@@ -127,7 +116,7 @@ def main():
     model_2_criterion = losses.get_loss(model_2_loss_config['type'], **model_2_loss_config.get('params', {}))
     
 
-    w_2 = get_weights_from_checkpoint(base_model, args.checkpoint_2)
+    w_2 = utils.get_weights_from_checkpoint(base_model, args.checkpoint_2)
 
     loss_tracker = losses.LossTracker(model_0_criterion, auxiliary_losses={
         'model_1_loss': model_1_criterion,
@@ -158,7 +147,6 @@ def main():
     betas = np.linspace(0.0 - args.margin_bottom, 1.0 + args.margin_top, G)
 
     # Initialize result arrays
-    # TODO: dynamically compute at least all relevant losses
     tr_loss = np.zeros((G, G))
     tr_loss_1 = np.zeros((G, G))
     tr_loss_2 = np.zeros((G, G))

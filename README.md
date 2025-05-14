@@ -1,3 +1,20 @@
+# My own README
+
+To run checkpoint_plane use command of the form:
+```
+python checkpoint_plane.py --checkpoint_0 "mlruns/204241287439378198/2492f844831d493482fbd37b4bf14b3f/artifacts/model-epoch-100/state_dict.pth" --checkpoint_1 "mlruns/204241287439378198/3f30b3c61159429b99fca72cc11e6f04/artifacts/model-epoch-100/state_dict.pth" --checkpoint_2 "mlruns/204241287439378198/ba666ee3a7744abaa38e1ba505496607/artifacts/model-epoch-100/state_dict.pth" --loss_config "loss_config.json" --model "VGG19" --grid_points 31 --dir "results/checkpoint_plane_margins" --margin_left 1 --margin_right 1 --margin_bottom 1 --margin_top 1
+```
+if using Docker then
+
+```
+docker run --gpus all --rm -v C:/Users/P70088982/Documents/dnn-mode-connectivity/mlruns:/app/mlruns -v C:/Users/P70088982/Documents/dnn-mode-connectivity/data:/app/data -v C:/Users/P70088982/Documents/dnn-mode-connectivity/results:/app/results plane-parallel --checkpoint_0 "mlruns/204241287439378198/2492f844831d493482fbd37b4bf14b3f/artifacts/model-epoch-100/state_dict.pth" --checkpoint_1 "mlruns/204241287439378198/3f30b3c61159429b99fca72cc11e6f04/artifacts/model-epoch-100/state_dict.pth" --checkpoint_2 "mlruns/204241287439378198/ba666ee3a7744abaa38e1ba505496607/artifacts/model-epoch-100/state_dict.pth" --loss_config "loss_config.json" --model "VGG19" --grid_points 21 --dir "results/checkpoint_plane_margins" --margin_left 1 --margin_right 1 --margin_bottom 1 --margin_top 1
+```
+To train model use command of the form:
+```
+docker run --gpus all -v "%cd%":/app -v "%cd%/mlruns":/app/mlruns --memory=8g --memory-swap=16g dnn-training python train.py --model VGG19 --dataset CIFAR10 --batch_size 128 --num-workers 8 --epochs 100 --data_path /app/data --loss_config loss_config.json
+```
+
+
 # Mode Connectivity and Fast Geometric Ensembling
 
 This repository contains a PyTorch implementation of the curve-finding and Fast Geometric Ensembling (FGE) procedures from the paper
