@@ -13,6 +13,7 @@ To train model use command of the form:
 ```
 docker run --gpus all -v "%cd%":/app -v "%cd%/mlruns":/app/mlruns --memory=8g --memory-swap=16g dnn-training python train.py --model VGG19 --dataset CIFAR10 --batch_size 128 --num-workers 8 --epochs 100 --data_path /app/data --loss_config loss_config.json
 ```
+to visualize a grid
 
 
 # Mode Connectivity and Fast Geometric Ensembling

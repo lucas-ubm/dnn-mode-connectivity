@@ -227,7 +227,7 @@ def main():
         columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'tr_f1', 'tr_roc_auc']
         for name in auxiliary_losses:
             columns.append(f'tr_{name}')
-        columns.extend(['te_nll', 'te_acc', 'te_f1', 'te_roc_auc'])
+        columns.extend(['te_loss', 'te_acc', 'te_f1', 'te_roc_auc'])
         for name in auxiliary_losses:
             columns.append(f'te_{name}')
         columns.append('time')
@@ -240,7 +240,7 @@ def main():
         )
 
         has_bn = utils.check_bn(model)
-        test_res = {'loss': None, 'accuracy': None, 'nll': None, 'f1': None, 'roc_auc': None}
+        test_res = {'loss': None, 'accuracy': None, 'loss': None, 'f1': None, 'roc_auc': None}
         
         for epoch in range(start_epoch, args.epochs + 1):
             time_ep = time.time()
@@ -270,7 +270,7 @@ def main():
             ]
             values.extend(train_res.get(name, 0.0) for name in auxiliary_losses)
             values.extend([
-                test_res['nll'], test_res['accuracy'], test_res['f1'], test_res['roc_auc']
+                test_res['loss'], test_res['accuracy'], test_res['f1'], test_res['roc_auc']
             ])
             values.extend(test_res.get(name, 0.0) for name in auxiliary_losses)
             values.append(time_ep)
@@ -282,7 +282,7 @@ def main():
                 'train_accuracy': train_res['accuracy'],
                 'train_f1': train_res['f1'],
                 'train_roc_auc': train_res['roc_auc'],
-                'test_nll': test_res['nll'],
+                'test_loss': test_res['loss'],
                 'test_accuracy': test_res['accuracy'],
                 'test_f1': test_res['f1'],
                 'test_roc_auc': test_res['roc_auc'],
