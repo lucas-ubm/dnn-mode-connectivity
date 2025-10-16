@@ -56,6 +56,18 @@ def compute_metrics(eval_pred, loss_tracker):
     # Compute F1 score
     f1_metric = load("f1")
     results["f1"] = f1_metric.compute(predictions=predictions.argmax(-1), references=labels, average="weighted")["f1"]
+
+    # Balanced accuracy makes no sense because of equal class balance in CIFAR-10 
+
+    # cm_metric = load("confusion_matrix")
+    # cm = cm_metric.compute(predictions=predictions.argmax(-1), references=labels, normalize= "true")["confusion_matrix"]
+    # balanced_accuracy = np.diag(cm).mean()
+    # results["balanced_accuracy"] = balanced_accuracy
+    # recall_per_class = np.diag(cm)
+    # print("Recall per class:", recall_per_class)
+    # print("Normalized by true labels check", cm.sum(axis=1))
+    # print("Balanced Accuracy:", recall_per_class.mean())
+    # print("Accuracy:", (predictions.argmax(-1) == labels).mean())
     
     # Compute ROC AUC
 
@@ -389,8 +401,9 @@ def main():
 
         time_ep = time.time() - time_ep
 
+
         values = [epoch, lr, train_metrics['loss'], train_metrics['accuracy'],
-                train_metrics['f1'], train_metrics.get('roc_auc', 'N/A')]
+                train_metrics['f1'],  train_metrics.get('roc_auc', 'N/A')]
         
         for name in auxiliary_losses:
             values.append(train_metrics.get(name, 'N/A'))
@@ -428,6 +441,8 @@ def main():
                 "train_f1": train_metrics['f1'],
                 "train_roc_auc": train_metrics.get('roc_auc', 0.0)
             })
+            for name in auxiliary_losses:
+                mlflow.log_metrics({f"train_{name}": train_metrics.get(name, 0.0)})
             
             # Log test metrics
             mlflow.log_metrics({
@@ -436,6 +451,9 @@ def main():
                 "test_f1": test_metrics['f1'],
                 "test_roc_auc": test_metrics.get('roc_auc', 0.0)
             })
+
+            for name in auxiliary_losses:
+                mlflow.log_metrics({f"test_{name}": test_metrics.get(name, 0.0)})
 
 
 if __name__ == '__main__':
