@@ -26,7 +26,8 @@ RUN pip install --no-cache-dir \
     scikit-learn \
     mlflow>=2.8.0 \ 
     datasets>=2.14.0 \
-    evaluate>=0.4.0
+    evaluate>=0.4.0 \
+    jsonschema>=4.19.1
 
 # Set working directory
 WORKDIR /app

@@ -1,0 +1,28 @@
+{
+    "experiment_name": "CIFAR10_VGG19_CE",
+    "developer": {
+        "loss_fn": "ce_loss.json",
+        "metrics": ["accuracy", "f1", "roc_auc"], 
+        "test_split": {
+            "random_seed": 42,
+            "test_size": 0.2
+        }, 
+        "stopping_criteria": {
+            "early_stopping": {
+                "metric": "loss",
+                "threshold": 0.01
+            },
+            "max_epochs": 10
+        }
+    }, 
+    "evaluator": {
+        "accuracy_requirement": {
+            "metrics": ["accuracy", "f1", "roc_auc"],
+            "thresholds": [0.85, 0.75, 0.75]
+        },
+        "test_split": {
+            "random_seed": 42,
+            "test_size": 0.2
+        }
+    }
+}

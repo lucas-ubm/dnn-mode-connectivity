@@ -1,0 +1,21 @@
+{
+    "main_loss": {
+        "type": "ce"
+    },
+    "auxiliary_losses": [
+        {
+            "type": "focal",
+            "params": {
+                "alpha": 0.25,
+                "gamma": 2.0
+            }
+        },
+        {
+            "type": "focal",
+            "params": {
+                "alpha": 0.5,
+                "gamma": 1.5
+            }
+        }
+    ]
+} 

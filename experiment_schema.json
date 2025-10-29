@@ -1,0 +1,153 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": ["experiment_name", "developer", "evaluator"],
+    "properties": {
+        "experiment_name": {
+            "type": "string",
+            "description": "Name of the experiment for tracking and logging purposes"
+        },
+        "developer": {
+            "type": "object",
+            "required": ["loss_fn", "metrics", "test_split", "stopping_criteria"],
+            "properties": {
+                "loss_fn": {
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "pattern": "^.*\\.json$",
+                            "description": "Path to a JSON file containing loss function configuration"
+                        },
+                        {
+                            "type": "object",
+                            "required": ["type"],
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["ce", "focal", "weighted"],
+                                    "description": "Type of loss function to use"
+                                },
+                                "params": {
+                                    "type": "object",
+                                    "properties": {
+                                        "alpha": {
+                                            "type": "number",
+                                            "description": "Alpha parameter for focal loss"
+                                        },
+                                        "gamma": {
+                                            "type": "number",
+                                            "description": "Gamma parameter for focal loss"
+                                        },
+                                        "weights": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "number"
+                                            },
+                                            "description": "Class weights for weighted loss"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "metrics": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["accuracy", "f1", "precision", "recall", "roc_auc", "confusion_matrix"]
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
+                },
+                "test_split": {
+                    "type": "object",
+                    "required": ["random_seed", "test_size"],
+                    "properties": {
+                        "random_seed": {
+                            "type": "integer",
+                            "minimum": 0
+                        },
+                        "test_size": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "exclusiveMaximum": 1
+                        }
+                    }
+                },
+                "stopping_criteria": {
+                    "type": "object",
+                    "required": ["early_stopping", "max_epochs"],
+                    "properties": {
+                        "early_stopping": {
+                            "type": "object",
+                            "required": ["metric", "threshold"],
+                            "properties": {
+                                "metric": {
+                                    "type": "string",
+                                    "enum": ["loss", "accuracy", "f1", "roc_auc"]
+                                },
+                                "threshold": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "description": "Minimum change in metric to continue training"
+                                }
+                            }
+                        },
+                        "max_epochs": {
+                            "type": "integer",
+                            "minimum": 1
+                        }
+                    }
+                }
+            }
+        },
+        "evaluator": {
+            "type": "object",
+            "required": ["accuracy_requirement", "test_split"],
+            "properties": {
+                "accuracy_requirement": {
+                    "type": "object",
+                    "required": ["metrics", "thresholds"],
+                    "properties": {
+                        "metrics": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": ["accuracy", "f1", "roc_auc"]
+                            },
+                            "minItems": 1,
+                            "uniqueItems": true
+                        },
+                        "thresholds": {
+                            "type": "array",
+                            "items": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                            },
+                            "minItems": 1
+                        }
+                    }
+                },
+                "test_split": {
+                    "type": "object",
+                    "required": ["random_seed", "test_size"],
+                    "properties": {
+                        "random_seed": {
+                            "type": "integer",
+                            "minimum": 0
+                        },
+                        "test_size": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "exclusiveMaximum": 1
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

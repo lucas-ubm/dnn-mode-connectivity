@@ -1,0 +1,11 @@
+name: new-dnn-mode-connectivity
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch=1.12.1
+  - torchvision=0.13.1
+  - cudatoolkit=11.3  # For GPU support
+  - tabulate>=0.8.7
