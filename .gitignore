@@ -5,6 +5,7 @@ models/
 checkpoints/
 mlruns/
 results/
+curve/
 
 # MLflow specific
 .mlflow/
