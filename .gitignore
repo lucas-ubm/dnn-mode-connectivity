@@ -11,6 +11,7 @@ results/
 *.mlflow
 mlflow.db
 mlruns/
+*mlruns/
 mlflow/
 
 # Byte-compiled / optimized / DLL files
