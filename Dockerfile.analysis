@@ -1,0 +1,50 @@
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    libopencv-dev \
+    python3-opencv \
+    libjpeg-dev \
+    libpng-dev \
+    libturbojpeg0-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+RUN pip install --no-cache-dir \
+    "numpy<2" \
+    tabulate \
+    opencv-python \
+    ffcv==1.0.2 \
+    matplotlib \
+    scipy \
+    scikit-learn \
+    mlflow>=2.8.0 \
+    datasets>=2.14.0 \
+    evaluate>=0.4.0 \
+    jsonschema>=4.19.1 \
+    jupyterlab 
+
+WORKDIR /app
+
+COPY utils.py ./
+COPY models/ models/
+
+COPY mlruns/ /app/mlruns/
+
+RUN mkdir -p /app/notebooks
+
+ENV PYTHONPATH=/app
+ENV CUDA_VISIBLE_DEVICES=0
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+ENV MLFLOW_TRACKING_URI=/app/mlruns
+
+EXPOSE 8888
+
+# Start Jupyter Lab on launch
+# --ip=0.0.0.0 makes it accessible from the host
+# --allow-root is necessary as docker runs as root by default
+# --no-browser prevents it from trying to open a browser inside the container
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--notebook-dir=/app/notebooks"]
