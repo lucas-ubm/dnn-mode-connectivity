@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 import mlflow
 import mlflow.pytorch
+from mlflow.models import infer_signature
 from torch.cuda.amp import autocast, GradScaler
 from datasets import Dataset
 from evaluate import load
@@ -505,13 +506,6 @@ def run(args):
                 print(table.split('\n')[0])
             print(table.split('\n')[2])
 
-            utils.save_checkpoint(
-                args.dir,
-                epoch,
-                model_state=model.state_dict(),
-                optimizer_state=optimizer.state_dict()
-            )
-
             metrics = {'learning_rate': lr}
             metrics['train_loss'] = train_metrics['loss']
             metrics['train_accuracy'] = train_metrics['accuracy']
@@ -526,6 +520,27 @@ def run(args):
                 metrics[f'test_{name}'] = test_metrics.get(name, 0.0)
             
             mlflow.log_metrics(metrics, step=epoch)
+
+            if epoch % args.save_freq == 0 or epoch == args.epochs:
+                print('Saving checkpoint...')
+                utils.save_checkpoint(
+                    args.dir,
+                    epoch,
+                    model_state=model.state_dict(),
+                    optimizer_state=optimizer.state_dict()
+                )
+                model.eval()
+                with torch.no_grad():
+                    sample_input = next(iter(loaders['test']))[0][:1].cuda()
+                    sample_output = model(sample_input)
+                signature = infer_signature(sample_input.cpu().numpy(), sample_output.detach().cpu().numpy())
+                env = mlflow.pytorch.get_default_conda_env()
+
+                #TODO: change where the model is logged
+                experiment_path 
+                name = f''
+                mlflow.pytorch.log_model(pytorch_model=model, name=f"model-epoch-{epoch}", signature=signature, conda_env=env)
+
 
 # TODO: add checker and logging of fulfillment of accuracy requirement
 
