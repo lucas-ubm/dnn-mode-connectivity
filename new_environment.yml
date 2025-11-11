@@ -9,3 +9,7 @@ dependencies:
   - torchvision=0.13.1
   - cudatoolkit=11.3  # For GPU support
   - tabulate>=0.8.7
+  - seaborn
+  - ipykernel
+  - pandas
+  - mlflow

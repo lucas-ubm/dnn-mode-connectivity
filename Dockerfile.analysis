@@ -24,15 +24,18 @@ RUN pip install --no-cache-dir \
     datasets>=2.14.0 \
     evaluate>=0.4.0 \
     jsonschema>=4.19.1 \
-    jupyterlab 
+    jupyterlab \
+    seaborn
 
 WORKDIR /app
 
 COPY utils.py ./
 COPY models/ models/
+COPY curves.py ./
 
-COPY mlruns/ /app/mlruns/
+# COPY mlruns/ /app/mlruns/
 
+RUN mkdir -p /app/mlruns
 RUN mkdir -p /app/notebooks
 
 ENV PYTHONPATH=/app
@@ -47,4 +50,4 @@ EXPOSE 8888
 # --ip=0.0.0.0 makes it accessible from the host
 # --allow-root is necessary as docker runs as root by default
 # --no-browser prevents it from trying to open a browser inside the container
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--notebook-dir=/app/notebooks"]
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--notebook-dir=/app/notebooks", "--ServerApp.allow_origin='*'"]

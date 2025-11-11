@@ -51,33 +51,37 @@ def suppress_stdout():
         finally:
             sys.stdout = old_stdout
 
-def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=False,
+def loaders(dataset, path, batch_size, num_workers, transform_name,
             shuffle_train=True):
     ds = getattr(torchvision.datasets, dataset)
     path = os.path.join(path, dataset.lower())
     transform = getattr(getattr(Transforms, dataset), transform_name)
     with suppress_stdout():
         train_set = ds(path, train=True, download=True, transform=transform.train)
-
-    if use_test:
-        print('You are going to run models on the test set. Are you sure?')
-        with suppress_stdout():
-            test_set = ds(path, train=False, download=True, transform=transform.test)
-    else:
-        # print("Using train (45000) + validation (5000)")
         train_set.data = train_set.data[:-5000]
         train_set.targets = train_set.targets[:-5000]
 
-        test_set = ds(path, train=True, download=True, transform=transform.test)
-        test_set.train = False
-        test_set.data = train_set.data[-5000:]
-        test_set.targets = train_set.targets[-5000:]
+    print('You are going to run models on the test set. Are you sure?')
+    with suppress_stdout():
+        test_set = ds(path, train=False, download=True, transform=transform.test)
+    val_set = ds(path, train=True, download=True, transform=transform.test)
+    val_set.train = False
+    val_set.data = train_set.data[-5000:]
+    val_set.targets = train_set.targets[-5000:]
+
 
     return {
                'train': torch.utils.data.DataLoader(
                    train_set,
                    batch_size=batch_size,
                    shuffle=shuffle_train,
+                   num_workers=num_workers,
+                   pin_memory=True
+               ),
+               'validation': torch.utils.data.DataLoader(
+                   val_set,
+                   batch_size=batch_size,
+                   shuffle=False,
                    num_workers=num_workers,
                    pin_memory=True
                ),

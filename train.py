@@ -262,7 +262,7 @@ def main():
                 )
                 # Log model state dict to MLflow instead of full model
                 mlflow.pytorch.log_state_dict(model.state_dict(), f"model-epoch-{epoch}")
-
+                
             time_ep = time.time() - time_ep
             values = [
                 epoch, lr,

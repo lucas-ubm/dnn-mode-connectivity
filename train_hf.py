@@ -20,12 +20,32 @@ import models
 import utils
 import losses
 
+classes = ["airplane", "automobile", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"]
+vehicles = ["airplane", "automobile", "ship", "truck"]
+land_vehicles = ["automobile", "truck"]
+animals = ["bird", "cat", "deer", "dog", "frog", "horse"]
+personalized_weight_matrix = np.zeros((10, 10)) * 0  # base weight
+for i in range(10):
+    cls_i = classes[i]
+    for j in range(10):
+        cls_j = classes[j]
+        if i == j:
+            personalized_weight_matrix[i, j] = 1
+        elif (cls_i in vehicles and cls_j in vehicles):
+            personalized_weight_matrix[i, j] = -1
+        elif (cls_i in land_vehicles and cls_j in land_vehicles):
+            personalized_weight_matrix[i, j] = 0
+        elif (cls_i in animals and cls_j in animals):
+            personalized_weight_matrix[i, j] = 0
+        else:
+            personalized_weight_matrix[i, j] = -2
 
 def load_loss_config(config_path):
     """Load loss configuration from JSON file"""
     with open(config_path, 'r') as f:
         config = json.load(f)
     return config
+
 
 
 def convert_to_hf_dataset(loader):
@@ -57,6 +77,35 @@ def compute_metrics(eval_pred, loss_tracker, metrics:list=None):
     # Compute F1 score
     f1_metric = load("f1")
     results["f1"] = f1_metric.compute(predictions=predictions.argmax(-1), references=labels, average="weighted")["f1"]
+
+    # Compute personalized metrics
+
+    # print("Personalized weight matrix:\n", personalized_weight_matrix)
+    # Retrieve huggingface confusion matrix metric
+    cm_metric = load("confusion_matrix")
+    cm = cm_metric.compute(predictions=predictions.argmax(-1), references=labels, normalize= None)["confusion_matrix"]
+    # print("Confusion Matrix:\n", cm)
+    # Compute accuracy based on confusion matrix
+    accuracy = np.trace(cm) / np.sum(cm)
+    personalized_accuracy = np.sum(cm * personalized_weight_matrix) / np.sum(cm)
+    results["personalized_accuracy"] = personalized_accuracy
+    # print(f"Accuracy is {accuracy} and personalized accuracy is {personalized_accuracy}")
+
+
+
+    # personalized_weight_matrix = np.array([
+    #     [0, 0.8, 0.5, 0., 0., 0., 0., 0., 0.5, 0.8],
+    #     [0.8, 0, 0.5, 0., 0., 0., 0., 0., 0.5, 0.8],
+    #     [0.5, 0.5, 0, 0.6, 0.6, 0.6, 0.6, 0.6, 0.5, 0.5],
+    #     [0., 0., 0.6, 0, 0.7, 0.7, 0.7, 0.7, 0., 0.],
+    #     [0., 0., 0.6, 0.7, 0, 0.7, 0.7, 0.7, 0., 0.],
+    #     [0., 0., 0.6, 0.7, 0.7, 0, 0.7, 0.7, 0., 0.],
+    #     [0., 0., 0.6, 0.7, 0.7, 0.7, 0, 0.7, 0., 0.],
+    #     [0., 0., 0.6, 0.7, 0.7, 0.7, 0.7, 0, 0., 0.],
+    #     [0.5, 0.5, 0.5, 0., 0., 0., 0., 0., 0, 0.8],
+    #     [0.8, 0.8, 0.5, 0., 0., 0., 0., 0., 0.8, 0],
+    # ])
+
 
     # Balanced accuracy makes no sense because of equal class balance in CIFAR-10 
 
@@ -324,9 +373,7 @@ def run(args):
         args.data_path,
         args.batch_size,
         args.num_workers,
-        args.transform,
-        args.use_test
-    )
+        args.transform)
     print(f"There are {len(loaders)} loaders, which are {list(loaders.keys())}")
 
     architecture = getattr(models, args.model)
@@ -456,6 +503,8 @@ def run(args):
             with open(args.experiment_path, 'r') as f:
                 experiment_json = json.load(f)
             mlflow.log_dict(experiment_json, "experiment_config.json")
+            cm_data = personalized_weight_matrix.tolist()
+            mlflow.log_dict(cm_data, "personalized_weight_matrix.json")
     print("The run id is:", initial_run_id)
     with mlflow.start_run(run_id=initial_run_id) as run:
         print("The MLFlow verison is:", mlflow.__version__)
@@ -474,9 +523,16 @@ def run(args):
                 regularizer
             )
 
+            val_metrics = test(
+                model,
+                loaders['validation'],
+                loss_tracker,
+                regularizer
+            )
+
             test_metrics = test(
                 model,
-                loaders['test'], #if args.use_test else loaders['valid'],
+                loaders['test'],
                 loss_tracker,
                 regularizer
             )
@@ -493,11 +549,11 @@ def run(args):
             for name in auxiliary_losses:
                 values.append(train_metrics.get(name, 'N/A'))
             
-            values.extend([test_metrics['loss'], test_metrics['accuracy'],
-                        test_metrics['f1'], test_metrics.get('roc_auc', 'N/A')])
+            values.extend([val_metrics['loss'], val_metrics['accuracy'],
+                        val_metrics['f1'], val_metrics.get('roc_auc', 'N/A')])
             
             for name in auxiliary_losses:
-                values.append(test_metrics.get(name, 'N/A'))
+                values.append(val_metrics.get(name, 'N/A'))
             
             values.append(time_ep)
 
@@ -509,15 +565,23 @@ def run(args):
             metrics = {'learning_rate': lr}
             metrics['train_loss'] = train_metrics['loss']
             metrics['train_accuracy'] = train_metrics['accuracy']
+            metrics['train_personalized_accuracy'] = train_metrics['personalized_accuracy']
             metrics['train_f1'] = train_metrics['f1']
             metrics['train_roc_auc'] = train_metrics.get('roc_auc', 0.0)
+            metrics['val_loss'] = val_metrics['loss']
+            metrics['val_accuracy'] = val_metrics['accuracy']
+            metrics['val_personalized_accuracy'] = val_metrics['personalized_accuracy']
+            metrics['val_f1'] = val_metrics['f1']
+            metrics['val_roc_auc'] = val_metrics.get('roc_auc', 0.0)
             metrics['test_loss'] = test_metrics['loss']
             metrics['test_accuracy'] = test_metrics['accuracy']
+            metrics['test_personalized_accuracy'] = test_metrics['personalized_accuracy']
             metrics['test_f1'] = test_metrics['f1']
             metrics['test_roc_auc'] = test_metrics.get('roc_auc', 0.0)
             for name in auxiliary_losses:
                 metrics[f'train_{name}'] = train_metrics.get(name, 0.0)
                 metrics[f'test_{name}'] = test_metrics.get(name, 0.0)
+                metrics[f'val_{name}'] = val_metrics.get(name, 0.0)
             
             mlflow.log_metrics(metrics, step=epoch)
 
@@ -536,9 +600,6 @@ def run(args):
                 signature = infer_signature(sample_input.cpu().numpy(), sample_output.detach().cpu().numpy())
                 env = mlflow.pytorch.get_default_conda_env()
 
-                #TODO: change where the model is logged
-                experiment_path 
-                name = f''
                 mlflow.pytorch.log_model(pytorch_model=model, name=f"model-epoch-{epoch}", signature=signature, conda_env=env)
 
 
